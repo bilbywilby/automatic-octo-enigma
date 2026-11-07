@@ -1,0 +1,95 @@
+name: TMU Control Plane CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          npm ci
+          cd server && npm ci && cd ..
+
+      - name: Run Linter
+        run: npm run lint --if-present
+
+      - name: Security Audit
+        run: npm audit --audit-level=high
+
+  test-matrix:
+    needs: lint-and-security
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['18.x', '20.x']
+        component: [frontend, backend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Test Frontend
+        if: matrix.component == 'frontend'
+        run: |
+          npm ci
+          npm test -- --ci --coverage
+
+      - name: Test Backend
+        if: matrix.component == 'backend'
+        run: |
+          cd server
+          npm ci
+          npm test
+
+  integration-and-e2e:
+    needs: test-matrix
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install All Dependencies
+        run: |
+          npm ci
+          cd server && npm ci && cd ..
+
+      - name: Run Integration Tests
+        run: npm run test:integration --if-present
+
+      - name: Build Artifacts
+        run: |
+          npm run build
+          cd server && npm run build
+
+  deploy-staging:
+    needs: integration-and-e2e
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to Staging Environment
+        run: |
+          echo "Syncing build artifacts to staging swarm node..."
+          # Insert rsync or deployment webhooks here
